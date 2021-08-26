@@ -1,4 +1,5 @@
-# Directory structure
+Directory structure
+===================
 First level corresponds to some arbitrary groupings of systems. Think of it as the name of the
 database.
 
@@ -15,39 +16,48 @@ calculation may be repeated multiple times as a result of checkpointing or resta
 calculations, and each calculation may be stored as a separate directory.
 
 
-# Setup
+Setup
+=====
+
 1. Load conda
+
 `module load conda`
 
 2. Activate virtual environment
+
 `conda activate /home/kimt1/envs/fanpy`
 
 3. Add commands to `.bashrc` if you'd like
 
-.. code-block:: bash
+```bash
   
     module load gaussian/16
     module load conda
     alias fanpy_activate='conda activate /home/kimt1/envs/fanpy'
+```
 
+Steps
+=====
 
-# Steps
 1. Make new database directory.
 
 The directory on which you create this new database directory will be called base directory.
 
 
-2. Make directory for each geometry. Within each directory, make an ".xyz2" file which consists of
-the atom and its coordinates (space separated) and different atoms separated by newline. Think of
-".xyz" without the header. Though it can be specified later on, *DEFAULT WILL ASSUME THAT IT IS IN
-ATOMIC UNITS*.
+2. Make directory for each geometry.
+   
+Within each directory, make an ".xyz2" file which consists of the atom and its coordinates (space
+separated) and different atoms separated by newline. Think of ".xyz" without the header. Though it
+can be specified later on, *DEFAULT WILL ASSUME THAT IT IS IN ATOMIC UNITS*.
 
 For example scripts, see scripts of the form `make_xxx_xyz.py`.
 
 
-3. Make a directory for the basis set. Within each directory, make/copy a ".gbs" file that you can
-obtain from https://www.basissetexchange.org/ (Format: Gaussian). It contains the atomic basis set
-information that will be used to run Gaussian calculations.
+3. Make a directory for the basis set.
+   
+Within each directory, make/copy a ".gbs" file that you can obtain from
+https://www.basissetexchange.org/ (Format: Gaussian). It contains the atomic basis set information
+that will be used to run Gaussian calculations.
 
 For example scripts, see scripts of the form `make_basis.py`.
 
@@ -100,13 +110,12 @@ Note that you specify the number of directories that you create. This will becom
 
 You can use the `write_wfn_py` function in the `run_calc` module in `/home/kimt1/`. Here's an
 example:
-.. code-block:: python
-
+```python
     run_calc.write_wfn_py('paldus/*/sto-6g/ap1rog/', 4, 'ap1rog', 
                            optimize_orbs=True, pspace_exc=[1, 2, 3, 4], objective='one_energy', solver='cma',
                            ham_noise=1e-3, wfn_noise=1e-2,
                            load_orbs=None, load_ham=None, load_wfn=None)
-
+```
 
 10. Run/submit the job
 
@@ -117,13 +126,13 @@ that if 10 directories were created in step 8, the calculation will be run 10 ti
 directories) or until time runs out or until it gets killed.
 
 To run each calculation separately, use the following commands:
-.. code-block:: python
-
+```python
     run_calc.write_wfn_py('paldus/*/sto-6g/ap1rog/*/', 4, 'ap1rog', 
                            optimize_orbs=True, pspace_exc=[1, 2, 3, 4], objective='one_energy', solver='cma',
                            ham_noise=1e-3, wfn_noise=1e-2,
                            load_orbs=None, load_ham=None, load_wfn=None)
     run_calc.run_calcs('paldus/*/sto-6g/ap1rog/*/calculate.py', time='1d', memory='3gb', outfile='results.out')
+```
 
 Using the same example as above, this will result in 10 jobs being submitted, each for running one
 calculation.
@@ -138,13 +147,13 @@ To make a special script for a given directory, replace the `*` with the desired
 If your calculation crashed (e.g. due to insufficient resources), you can restart your calculation
 from a checkpoint.
 
-.. code-block:: python
-
+```python
     run_calc.write_wfn_py('paldus/*/sto-6g/ap1rog/0/', 4, 'ap1rog', 
                            optimize_orbs=True, pspace_exc=[1, 2, 3, 4], objective='one_energy', solver='cma',
                            ham_noise=1e-3, wfn_noise=1e-2,
                            load_orbs=None, load_ham=None, load_wfn=None, load_chk='checkpoint.npy')
     run_calc.run_calcs('paldus/*/sto-6g/ap1rog/0/', time='1d', memory='3gb', outfile='results.out')
+```
 
 If you are restarting your calculation from the same directory, it might be a good idea to rename
 checkpoint file and the output file so that they don't get overwritten.
@@ -161,8 +170,7 @@ To make the process a little bit easier, you can use the `edit_file` function in
 `edit_calculate` module in `/home/kimt1/`. Note that there's a lot of hard coding in this one, so
 you'll like have to make changes yourself.
 
-.. code-block:: python
-
+```python
     for dirname in sorted(glob('paldus/*/sto-6g/apig'), reverse=True):
         run_calc.write_wfn_py(f'{dirname}/0', 8, 'apig',
                               optimize_orbs=True, pspace_exc=[2, 4, 6, 8], objective='one_energy', solver='minimize',
@@ -170,6 +178,7 @@ you'll like have to make changes yourself.
                               load_orbs=None, load_ham=None, load_wfn=None, load_chk='../../ap1rog/2/checkpoint.npy')
         # run_nn
         edit_calculate.edit_file(f'{dirname}/0/calculate.py', truncate_projection=False, proj_seniority=True, energy_constraint=False, cma=False, ap1rog_chk=True)
+```
 
 This module changes pretty frequently and isn't maintained that well. It'd be better for you to
 simply skim it and make a module yourself. (All it does is replace the appropriate parts with
