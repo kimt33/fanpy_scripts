@@ -6,6 +6,9 @@ import subprocess
 import numpy as np
 import make_xyz
 from make_com import make_com
+import fanpy.scripts.make_localize_hf
+import fanpy.scripts.make_embedding_script
+import fanpy.scripts.make_cc_embedding_script
 
 
 def make_dirs(name: str, start_template: str, end_template: str, basis: str, num_steps=10, homedir='database'):
@@ -77,7 +80,7 @@ def make_dirs(name: str, start_template: str, end_template: str, basis: str, num
             print(f'Cannot find `.gbs` file that correspond to the given basis, {basis}')
 
 
-def write_coms(pattern: str, memory='2gb', charge=0, multiplicity=1, units="AU"):
+def write_coms(pattern: str, basisfile=None, memory='2gb', charge=0, multiplicity=1, units="AU"):
     """Write the Gaussian com files for the directories that match the given pattern.
 
     Parameters
@@ -114,6 +117,7 @@ def write_coms(pattern: str, memory='2gb', charge=0, multiplicity=1, units="AU")
         *_, system_templates_index, basis = os.path.normpath(parent).split(os.path.sep)
 
         dirname = os.path.join(parent, 'hf')
+        print(dirname)
         # make directory if it does not exist
         if not os.path.isdir(dirname):
             os.mkdir(dirname)
@@ -121,9 +125,14 @@ def write_coms(pattern: str, memory='2gb', charge=0, multiplicity=1, units="AU")
         with open(os.path.join(parent, '..', 'system.xyz2'), 'r') as f:
             xyz_content = f.read()
         # get com content
-        com_content = make_com(xyz_content, os.path.join("/home/kimt1/basis", basis), chkfile='hf_sp.chk', memory=memory,
-                               title=f'HF/{basis} calculation for {system_templates_index}',
-                               charge=charge, multiplicity=multiplicity, units=units)
+        if basisfile:
+            com_content = make_com(xyz_content, os.path.join(os.getcwd(), parent, basisfile), chkfile='hf_sp.chk', memory=memory,
+                                   title=f'HF/{basis} calculation for {system_templates_index}',
+                                   charge=charge, multiplicity=multiplicity, units=units)
+        else:
+            com_content = make_com(xyz_content, os.path.join("/home/kimt1/basis", basis), chkfile='hf_sp.chk', memory=memory,
+                                   title=f'HF/{basis} calculation for {system_templates_index}',
+                                   charge=charge, multiplicity=multiplicity, units=units)
         # make com file
         with open(os.path.join(dirname, 'hf_sp.com'), 'w')as f:
             f.write(com_content)
@@ -142,7 +151,7 @@ def make_orb_dirs(pattern: str, name: str):
         os.mkdir(newdir)
 
 
-def make_wfn_dirs(pattern: str, wfn_name: str, num_runs: int):
+def make_wfn_dirs(pattern: str, wfn_name: str, num_runs: int, rep_dirname_prefix: str=""):
     """Make directories for running the wavefunction calculations.
 
     Parameters
@@ -154,6 +163,9 @@ def make_wfn_dirs(pattern: str, wfn_name: str, num_runs: int):
         Name of the wavefunction.
     num_runs : int
         Number of calculations that will be run.
+    rep_dirname_prefix : str
+        Prefix to the directory names (of the repeated runs) to be created.
+        Note that underscore will be added to separate index of run.
 
     """
     for parent in glob.glob(pattern):
@@ -169,15 +181,17 @@ def make_wfn_dirs(pattern: str, wfn_name: str, num_runs: int):
 
         for i in range(num_runs):
             try:
-                os.mkdir(os.path.join(newdir, str(i)))
+                os.mkdir(os.path.join(newdir, f"{rep_dirname_prefix}_{i}"))
             except FileExistsError:
                 pass
 
 
 def write_wfn_py(pattern: str, nelec: int, wfn_type: str, optimize_orbs: bool=False,
-                 pspace_exc=None, objective=None, solver=None, nproj=None,
+                 pspace_exc=None, nproj=0, objective=None, solver=None,
                  ham_noise=None, wfn_noise=None,
                  solver_kwargs=None, wfn_kwargs=None,
+                 fanpt=False, fanpt_kwargs=None, fanpt_solver=None, fanpt_solver_kwargs=None,
+                 oneint_path=None, twoint_path=None, hf_energies_path=None,
                  load_orbs=None, load_ham=None, load_wfn=None, load_chk=None, load_prev=False,
                  memory=None, filename=None, ncores=1, exclude=None, old_fanpy=False):
     """Make a script for running calculations.
@@ -186,33 +200,40 @@ def write_wfn_py(pattern: str, nelec: int, wfn_type: str, optimize_orbs: bool=Fa
     ----------
     nelec : int
         Number of electrons.
-    one_int_file : str
-        Path to the one electron integrals (for restricted orbitals).
-        One electron integrals should be stored as a numpy array of dimension (nspin/2, nspin/2).
-    two_int_file : str
-        Path to the two electron integrals (for restricted orbitals).
-        Two electron integrals should be stored as a numpy array of dimension
-        (nspin/2, nspin/2, nspin/2, nspin/2).
     wfn_type : str
         Type of wavefunction.
-        One of `fci`, `doci`, `mps`, `determinant-ratio`, `ap1rog`, `apr2g`, `apig`, `apsetg`, and
-        `apg`.
+        One of `
+        "ci_pairs", "cisd", "doci", "fci",
+        "mps",
+        "determinant-ratio",
+        "ap1rog", "apr2g", "apig", "apsetg", "apg",
+        "network", "rbm",
+        "basecc", "standardcc", "generalizedcc", "senioritycc", "pccd", "ccsd", "ccsdt", "ccsdtq",
+        "ap1rogsd", "ap1rogsd_spin", "apsetgd", "apsetgsd", "apg1rod", "apg1rosd",
+        "ccsdsen0", "ccsdqsen0", "ccsdtqsen0", "ccsdtsen2qsen0".
     optimize_orbs : bool
         If True, orbitals are optimized.
         If False, orbitals are not optimized.
         By default, orbitals are not optimized.
-        Not compatible with solvers that require a gradient (everything except cma).
+        Not compatible with faster fanpy (i.e. `old_fanpy=False`)
     pspace_exc : list of int
         Orders of excitations that will be used to build the projection space.
-        Default is first and second order excitations of the HF ground state.
+        Default is first, second, third, and fourth order excitations of the HF ground state.
+        Used for slower fanpy (i.e. `old_fanpy=True`)
+    nproj : int
+        Number of projection states that will be used.
+        Default uses all possible projection states (i.e. Slater determinants.
+        Used for faster fanpy (i.e. `old_fanpy=False`)
     objective : str
         Form of the Schrodinger equation that will be solved.
         Use `system` to solve the Schrodinger equation as a system of equations.
         Use `least_squares` to solve the Schrodinger equation as a squared sum of the system of
         equations.
-        Use `variational` to solve the Schrodinger equation variationally.
-        Must be one of `system`, `least_squares`, and `variational`.
+        Use "one_energy" to minimize the energy projected on one sided.
+        Use "variatioinal" to minimize the energy projected on both sided.
+        Must be one of "system", "least_squares", "one_energy", and "variational".
         By default, the Schrodinger equation is solved as system of equations.
+        "least_squares" is not supported in faster fanpy (i.e. `old_fanpy=False`)
     solver : str
         Solver that will be used to solve the Schrodinger equation.
         Keyword `cma` uses Covariance Matrix Adaptation - Evolution Strategy (CMA-ES).
@@ -230,6 +251,20 @@ def write_wfn_py(pattern: str, nelec: int, wfn_type: str, optimize_orbs: bool=Fa
         Scale of the noise to be applied to the wavefunction parameters.
         The noise is generated using a uniform distribution between -1 and 1.
         By default, no noise is added.
+    solver_kwargs : str
+        String to be added as arguments and keyword arguments when running the solver.
+        To be added after `solver(objective, `
+        Default settings are used if not provided.
+    wfn_kwargs : str
+        String to be added as arguments and keyword arguments when instantiating the
+        wavefunction.
+        To be added after `Wavefunction(nelec, nspin, params=params, memory=memory, `
+        Default settings are used if not provided.
+    fanpt : bool
+        Flag to use FANPT solver to make little steps between Fock and given Hamiltonian,
+        while optimizing with given in between.
+    fanpt_kwargs : str
+        String to be added as arguments and keyword arguments when running fanpt.
     load_orbs : str
         Numpy file of the orbital transformation matrix that will be applied to the initial
         Hamiltonian.
@@ -245,6 +280,15 @@ def write_wfn_py(pattern: str, nelec: int, wfn_type: str, optimize_orbs: bool=Fa
         Numpy file of the checkpoint for the optimization.
     memory : str
         Memory available to run the calculation.
+        e.g. '2gb'
+        Default assumes no restrictions on memory usage
+    filename : str
+        Filename to save the generated script file.
+        Default just prints it out to stdout.
+    old_fanpy : bool
+        Use old, slower (but probably more robust) fanpy.
+        Default uses faster fanpy.
+        Some features are not avaialble on new fanpy.
 
     """
     cwd = os.getcwd()
@@ -307,14 +351,19 @@ def write_wfn_py(pattern: str, nelec: int, wfn_type: str, optimize_orbs: bool=Fa
         # check if final directory is a number
         _, dirname = os.path.split(parent)
         
-        if os.path.isfile('../hf/oneint.npy'):
-            oneint = os.path.abspath('../hf/oneint.npy')
-            twoint = os.path.abspath('../hf/twoint.npy')
-            hf_energies = os.path.abspath('../hf/hf_energies.npy')
+        if oneint_path is None:
+            if os.path.isfile('../hf/oneint.npy'):
+                oneint = os.path.abspath('../hf/oneint.npy')
+                twoint = os.path.abspath('../hf/twoint.npy')
+                hf_energies = os.path.abspath('../hf/hf_energies.npy')
+            else:
+                oneint = os.path.abspath('../../hf/oneint.npy')
+                twoint = os.path.abspath('../../hf/twoint.npy')
+                hf_energies = os.path.abspath('../../hf/hf_energies.npy')
         else:
-            oneint = os.path.abspath('../../hf/oneint.npy')
-            twoint = os.path.abspath('../../hf/twoint.npy')
-            hf_energies = os.path.abspath('../../hf/hf_energies.npy')
+            oneint = os.path.abspath(oneint_path)
+            twoint = os.path.abspath(twoint_path)
+            hf_energies = os.path.abspath(hf_energies_path)
 
         nspin = np.load(oneint).shape[1] * 2
         nucnuc = np.load(hf_energies)[1]
@@ -351,11 +400,20 @@ def write_wfn_py(pattern: str, nelec: int, wfn_type: str, optimize_orbs: bool=Fa
         #        os.chdir(cwd)
         #        continue
 
-        print(parent)
-        if nproj:
-            pspace = ['--nproj', str(nproj)]
-        else:
+        fanpt_args = []
+        if fanpt:
+            fanpt_args = ["--fanpt", "--fanpt_kwargs", fanpt_kwargs]
+            if fanpt_solver:
+                fanpt_args.append("--fanpt_solver")
+                fanpt_args.append(fanpt_solver)
+            if fanpt_solver_kwargs:
+                fanpt_args.append("--fanpt_solver_kwargs")
+                fanpt_args.append(fanpt_solver_kwargs)
+
+        if old_fanpy:
             pspace = ['--pspace', *pspace_exc]
+        else:
+            pspace = ['--nproj', str(nproj)]
         subprocess.run([#'wfns_make_script',
                         # 'python', '/home/kimt1/fanpy/wfns/scripts/make_script.py',
                         'fanpy_make_script' if old_fanpy else 'fanpy_make_fanci_script',
@@ -364,6 +422,7 @@ def write_wfn_py(pattern: str, nelec: int, wfn_type: str, optimize_orbs: bool=Fa
                         '--nuc_repulsion', f'{nucnuc}', *optimize_orbs, '--wfn_type', wfn_type,
                         '--objective', objective,
                         '--solver', solver, *kwargs,
+                        *fanpt_args,
                         *load_files,
                         # '--save_ham', save_ham,
                         # '--save_wfn', save_wfn,
@@ -376,7 +435,55 @@ def write_wfn_py(pattern: str, nelec: int, wfn_type: str, optimize_orbs: bool=Fa
         os.chdir(cwd)
 
 
-def run_calcs(pattern: str, time=None, memory=None, ncores=1, outfile='outfile', exclude=None, calc_range=None):
+def write_embedding_wfn_py(pattern: str, wfn_file_list: list, system_inds: list, ao_inds_file: str, ao_inds=None, indices_list=None, exclude=None, filename=None,
+        cc=False, loc_type="pm", orbital_optimization=False, wfn_noise=0, disjoint=False,
+    ):
+    """Make a script for running calculations.
+
+    Parameters
+    ----------
+    pattern : str
+        Pattern for selecting the files.
+    wfn_file_list : list of str
+        List of the fanpy scripts that corresponds to different wavefucntions.
+    system_inds : list of int
+        List of the indices of the systems to which each atom belongs
+    ao_inds_file : str
+        Filename of the ao_inds numpy file.
+        Contains the system indices of the atomic orbitals.
+    ao_inds : list of int
+        System indices of the atomic/localized/molecular orbitals.
+        WILL OVERRIDE ao_inds_file
+    filename : str
+        Name of the file to which generated script is stored.
+        
+    """
+    cwd = os.getcwd()
+
+    for parent in glob.glob(pattern):
+        if not os.path.isdir(parent):
+            continue
+        if exclude and any(i in os.path.abspath(parent) for i in exclude):
+            #print(parent, 'x')
+            continue
+
+        os.chdir(parent)
+
+        if filename is None:
+            filename = 'calculate.py'
+
+        # check if final directory is a number
+        _, dirname = os.path.split(parent)
+        
+        if not cc:
+            fanpy.scripts.make_embedding_script.make_script(wfn_file_list, system_inds, ao_inds_file, ao_inds=ao_inds, indices_list=indices_list, filename=filename, loc_type=loc_type, orbital_optimization=orbital_optimization, disjoint=disjoint)
+        else:
+            fanpy.scripts.make_cc_embedding_script.make_script(wfn_file_list, system_inds, ao_inds_file, ao_inds=ao_inds, filename=filename, loc_type=loc_type, orbital_optimization=orbital_optimization, wfn_noise=wfn_noise)
+
+        os.chdir(cwd)
+
+
+def run_calcs(pattern: str, time=None, memory=None, ncores=1, outfile='outfile', results_out="results.out", exclude=None, calc_range=None, arg=None, cubes=False, cube_dim=40):
     """Run the calculations for the selected files/directories.
 
     Parameters
@@ -428,6 +535,7 @@ def run_calcs(pattern: str, time=None, memory=None, ncores=1, outfile='outfile',
             dirname, filename = os.path.split(filename)
             os.chdir(dirname)
 
+        print(database, system, basis, wfn)
         if wfn[0] == 'hf' and os.path.splitext(filename)[1] == '.com':
             # write script (because sbatch only takes one command)
             if submit_job:
@@ -444,23 +552,32 @@ def run_calcs(pattern: str, time=None, memory=None, ncores=1, outfile='outfile',
                        #'/home/kimt1/fanpy/wfns/wrapper/horton_gaussian_fchk.py',
                        '/home/kimt1/fanpy/fanpy/tools/wrapper/horton_gaussian_fchk.py',
                        'hf_energies.npy', 'oneint.npy', 'twoint.npy', 't_ab_mo.npy', 'fchk_file', filename]
+        elif wfn[0].startswith('hf_'):
+            method = wfn[0][3:]
+            if arg is None:
+                raise ValueError("To run localized calculation, indices of the subsystem orbitals must be provided as arg")
+            fanpy.scripts.make_localize_hf.make_script(
+                    '../../system.xyz2', '../basis.gbs', method, arg,
+                    mo_coeff_file='../hf/t_ab_mo.npy', filename='calculate.py', cubes=cubes, cube_dim=cube_dim
+            )
+            command = ['python', 'calculate.py']
         elif len(wfn) == 1:
             with open('results.sh', 'w') as f:
                 f.write('#!/bin/bash\n')
                 f.write('cd 50\n')
-                f.write('python -u calculate.py > results.out\n')
+                f.write(f'python -u calculate.py > {results_out}\n')
                 f.write('cd ../51\n')
-                f.write('python -u calculate.py > results.out\n')
+                f.write(f'python -u calculate.py > {results_out}\n')
                 f.write('cd ../52\n')
-                f.write('python -u calculate.py > results.out\n')
+                f.write(f'python -u calculate.py > {results_out}\n')
                 f.write('cd ../53\n')
-                f.write('python -u calculate.py > results.out\n')
+                f.write(f'python -u calculate.py > {results_out}\n')
                 f.write('cd ../54\n')
-                f.write('python -u calculate.py > results.out\n')
+                f.write(f'python -u calculate.py > {results_out}\n')
                 f.write('cd ../55\n')
-                f.write('python -u calculate.py > results.out\n')
+                f.write(f'python -u calculate.py > {results_out}\n')
                 f.write('cd ../56\n')
-                f.write('python -u calculate.py > results.out\n')
+                f.write(f'python -u calculate.py > {results_out}\n')
             subprocess.run(['chmod', 'u+x', 'results.sh'])
             command = ['./results.sh']
         elif len(wfn) == 2:
@@ -473,13 +590,13 @@ def run_calcs(pattern: str, time=None, memory=None, ncores=1, outfile='outfile',
                     else:
                         f.write('for i in */; do\n')
                     f.write('    cd $i\n')
-                    f.write('    python -u ../calculate.py > results.out\n')
+                    f.write(f'    python -u ../calculate.py > {results_out}\n')
                     f.write('    cd $cwd\n')
                     f.write('done\n')
             elif os.path.isfile('./calculate.py'):
                 with open('results.sh', 'w') as f:
                     f.write('#!/bin/bash\n')
-                    f.write('python -u ./calculate.py > results.out\n')
+                    f.write(f'python -u ./calculate.py > {results_out}\n')
                     #f.write('python -u ./calculate.py\n')
             elif os.path.splitext(filename)[1] == '.com':
                 with open('results.sh', 'w') as f:

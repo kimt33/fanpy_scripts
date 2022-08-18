@@ -16,12 +16,13 @@ Fourth level corresponds to the method. Methods with different hyperparameter se
 considered different methods. For example, CCSD and CCSDT are considered to be different methods.
 Different objectives such as projected vs variational may need to be differentiated here.
 
-Fifth level corresponds to the a calculation for the given system at method/basis. Note that a given
-calculation may be repeated multiple times as a result of checkpointing or restarting the
-calculations, and each calculation may be stored as a separate directory.
+Fifth level corresponds to a calculation for the given system at method/basis. Note that a given
+calculation may be repeated multiple times due to restarting the calculations or due to using
+different hyperparameters for the calculations. Each calculation should be stored as a separate 
+directory.
 
 Example:
-./paldus/p4_a20_alpha2.0/sto-6g/ap1rog/3/
+./paldus/p4_a20_alpha2.0/sto-6g/ap1rog/energy_min_1/
 zeroth level = ./
   current directory is always considered the base directory
 first level = paldus
@@ -32,9 +33,12 @@ second level = p4_a20_alpha2.5
   alpha2.5 means that the distance between the two H2 molecules is 2 Bohr
 third level = sto-6g
 fourth level = ap1rog
-fifth level = 3
-  3 means that this is the third calculation for AP1roG/STO-6G for the system P4 with 2 Bohr bond
-  length and 2.5 Bohr distance between the two H.
+fifth level = energy_min_1
+  1 means that this is the second calculation (zero-indexed) for minimizing the energy of 
+  AP1roG/STO-6G for the system P4 with 2 Bohr bond length and 2.5 Bohr distance between the two H.
+
+Note that the variations in fifth level can be moved into the fourth level. In this example, we
+could have the following structure: ./paldus/p4_a20_alpha2.0/sto-6g/ap1rog_energy_min/1/
 
 Setup
 =====
