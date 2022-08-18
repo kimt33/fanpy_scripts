@@ -228,7 +228,7 @@ for system in systems:
                 "File,Distance ({}),Nuclear Repulsion Energy (Hartree),HF Electronic Energy "
                 "(Hartree),HF Total Energy (Hatree)\n".format(systems[system])
             )
-            for i in glob(f"{system}_*/{basis}/fci/*/fci_spin1.log"):
+            for i in glob(f"{system}_*/{basis}/hf/hf_sp.log"):
                 #print(i)
                 f.write(i)
                 f.write(",")
@@ -236,11 +236,11 @@ for system in systems:
                 #    f.write(re.search("H ([-\d\.]+) ", g.readlines()[1]).group(1))
                 f.write(re.search(f'{system}_([\d\.]+)', i).group(1))
                 f.write(",")
-                f.write(str(np.load(os.path.join(os.path.split(i)[0], '../../hf/hf_energies.npy'))[1]))
+                f.write(str(np.load(os.path.join(os.path.split(i)[0], 'hf_energies.npy'))[1]))
                 f.write(",")
-                f.write(str(np.load(os.path.join(os.path.split(i)[0], '../../hf/hf_energies.npy'))[0]))
+                f.write(str(np.load(os.path.join(os.path.split(i)[0], 'hf_energies.npy'))[0]))
                 f.write(",")
-                f.write(str(sum(np.load(os.path.join(os.path.split(i)[0], '../../hf/hf_energies.npy')))))
+                f.write(str(sum(np.load(os.path.join(os.path.split(i)[0], 'hf_energies.npy')))))
                 f.write("\n")
 
 

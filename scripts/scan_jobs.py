@@ -54,7 +54,7 @@ for output, jobid in zip(outputs, jobids):
     pass
     
     print(output, jobid)
-    subprocess.run(['scancel', jobid])
+    #subprocess.run(['scancel', jobid])
     #if 'ccsdt/' in output and 'h10' in output:
     #    print(output, jobid)
     #    #subprocess.run(['scancel', jobid])
